@@ -487,18 +487,26 @@ func (a *agent) processEvent(ctx context.Context, model client.Model, sessionID 
 		assistantMsg.AppendContent(event.Content)
 		return a.messages.Update(ctx, *assistantMsg)
 	case client.EventToolUseStart:
+		if event.ToolCall == nil {
+			return nil
+		}
 		assistantMsg.AddToolCall(*event.ToolCall)
 		return a.messages.Update(ctx, *assistantMsg)
-	// TODO: see how to handle this
-	// case client.EventToolUseDelta:
-	// 	tm := time.Unix(assistantMsg.UpdatedAt, 0)
-	// 	assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
-	// 	if time.Since(tm) > 1000*time.Millisecond {
-	// 		err := a.messages.Update(ctx, *assistantMsg)
-	// 		assistantMsg.UpdatedAt = time.Now().Unix()
-	// 		return err
-	// 	}
+	case client.EventToolUseDelta:
+		if event.ToolCall == nil {
+			return nil
+		}
+		tm := time.Unix(assistantMsg.UpdatedAt, 0)
+		assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
+		if time.Since(tm) > time.Second {
+			err := a.messages.Update(ctx, *assistantMsg)
+			assistantMsg.UpdatedAt = time.Now().Unix()
+			return err
+		}
 	case client.EventToolUseStop:
+		if event.ToolCall == nil {
+			return nil
+		}
 		assistantMsg.FinishToolCall(event.ToolCall.ID)
 		return a.messages.Update(ctx, *assistantMsg)
 	case client.EventError:
@@ -509,7 +517,12 @@ func (a *agent) processEvent(ctx context.Context, model client.Model, sessionID 
 		logging.ErrorPersist(event.Error.Error())
 		return event.Error
 	case client.EventComplete:
-		assistantMsg.SetToolCalls(event.Response.ToolCalls)
+		if event.Response == nil {
+			return nil
+		}
+		if len(event.Response.ToolCalls) > 0 {
+			assistantMsg.SetToolCalls(event.Response.ToolCalls)
+		}
 		assistantMsg.AddFinish(event.Response.FinishReason)
 		if err := a.messages.Update(ctx, *assistantMsg); err != nil {
 			return fmt.Errorf("failed to update message: %w", err)
